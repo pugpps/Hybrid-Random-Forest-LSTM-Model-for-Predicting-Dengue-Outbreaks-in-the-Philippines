@@ -1,151 +1,97 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Dengue Forecasting Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<style>
-    body {
-        font-family: "Segoe UI", Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        background: #eef2f7;
-    }
-
-    .container {
-        background: white;
-        max-width: 950px;
-        margin: 40px auto;
-        padding: 35px;
-        border-radius: 14px;
-        box-shadow: 0 6px 25px rgba(0,0,0,0.1);
-    }
-
-    h2 {
-        margin-top: 0;
-        color: #1c3d70;
-    }
-
-    canvas {
-        margin-top: 20px;
-        background: #ffffff;
-        border-radius: 8px;
-        padding: 10px;
-    }
-
-    .metric-box {
-        background: #f4f7fb;
-        padding: 15px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        border-left: 5px solid #1c3d70;
-    }
-
-    .section-title {
-        margin-top: 35px;
-        color: #1c3d70;
-        font-weight: bold;
-        border-left: 4px solid #1c3d70;
-        padding-left: 10px;
-    }
-
-    .highlight {
-        font-weight: bold;
-        color: #0a7c25;
-    }
-</style>
-</head>
-
-<body>
-<div class="container">
-    <h2>🦟 Dengue Forecasting Dashboard</h2>
-
-    <h3 class="section-title">📊 Actual vs Predicted</h3>
-    <canvas id="chart_actual_pred"></canvas>
-
-    <h3 class="section-title">📌 Model Accuracy</h3>
-    <div id="accuracy" class="metric-box"></div>
-
-    <h3 class="section-title">🔮 Forecast (Next 4 Months)</h3>
-    <canvas id="chart_forecast"></canvas>
-
-    <div id="forecast_values" class="metric-box"></div>
-</div>
-
 <script>
-// Load JSON automatically
-fetch("dengue_dashboard_output.json")
-    .then(response => response.json())
-    .then(data => {
+// 🔗 Replace this URL with your GitHub RAW CSV link
+const csvUrl = "https://raw.githubusercontent.com/<username>/<repo>/main/dengue_output.csv";
 
-        // ============================
-        // Chart 1 — Actual vs Predicted
-        // ============================
-        new Chart(document.getElementById("chart_actual_pred"), {
-            type: "line",
+// Auto-load CSV from GitHub
+fetch(csvUrl)
+    .then(response => response.text())
+    .then(text => {
+        const lines = text.split("\n").slice(1);
+        let dates = [], actual = [], predicted = [];
+
+        lines.forEach(row => {
+            const cols = row.split(",");
+            if(cols.length >= 3){
+                dates.push(cols[0]);
+                actual.push(parseFloat(cols[1]));
+                predicted.push(parseFloat(cols[2]));
+            }
+        });
+
+        // --- Chart 1: Actual vs Predicted ---
+        new Chart(document.getElementById('chart1'), {
+            type: 'line',
             data: {
-                labels: data.dates,
+                labels: dates,
                 datasets: [
-                    { 
-                        label: "Actual Cases", 
-                        data: data.actual_cases, 
-                        borderColor: "#1c3d70", 
-                        borderWidth: 2,
-                        tension: 0.3
-                    },
-                    { 
-                        label: "Predicted Cases", 
-                        data: data.lstm_training_pred, 
-                        borderColor: "#e67e22", 
-                        borderWidth: 2,
-                        tension: 0.3
-                    }
+                    { label: 'Actual', data: actual, borderColor: '#1c3d70', borderWidth: 2, tension: 0.3 },
+                    { label: 'Predicted', data: predicted, borderColor: '#e67e22', borderWidth: 2, tension: 0.3 }
                 ]
             }
         });
 
-        // ============================
-        // Accuracy Display
-        // ============================
-        document.getElementById("accuracy").innerHTML =
-            `<b>Random Forest Accuracy (R²):</b> <span class="highlight">${(data.rf_accuracy_r2 * 100).toFixed(2)}%</span><br>
-             <b>LSTM Accuracy (R²):</b> <span class="highlight">${(data.lstm_accuracy_r2 * 100).toFixed(2)}%</span>`;
+        // --- Metrics ---
+        function avg(arr){ return arr.reduce((a,b)=>a+b,0) / arr.length; }
+        function RMSE(a,p){ let s=0; for(let i=0;i<a.length;i++) s+=(a[i]-p[i])**2; return Math.sqrt(s/a.length); }
+        function MAE(a,p){ let s=0; for(let i=0;i<a.length;i++) s+=Math.abs(a[i]-p[i]); return s/a.length; }
+        function MAPE(a,p){ let s=0; for(let i=0;i<a.length;i++) s+=Math.abs((a[i]-p[i])/a[i]); return (s/a.length)*100; }
 
-        // ============================
-        // Forecast Chart
-        // ============================
-        new Chart(document.getElementById("chart_forecast"), {
-            type: "line",
+        let rmse = RMSE(actual, predicted);
+        let mae = MAE(actual, predicted);
+        let mape = MAPE(actual, predicted);
+        let accuracy = (100 - mape).toFixed(2);
+
+        document.getElementById("metrics").innerHTML = `
+            RMSE: <b>${rmse.toFixed(2)}</b><br>
+            MAE: <b>${mae.toFixed(2)}</b><br>
+            MAPE: <b>${mape.toFixed(2)}%</b><br><br>
+            <span class="highlight">Accuracy: ${accuracy}%</span>
+        `;
+
+        // --- Summary Stats ---
+        document.getElementById("summary").innerHTML = `
+            <b>Date Range:</b> ${dates[0]} → ${dates[dates.length-1]}<br>
+            <b>Highest Actual Case:</b> ${Math.max(...actual)}<br>
+            <b>Lowest Actual Case:</b> ${Math.min(...actual)}<br>
+            <b>Highest Predicted Case:</b> ${Math.max(...predicted)}<br>
+            <b>Lowest Predicted Case:</b> ${Math.min(...predicted)}<br>
+        `;
+
+        // --- Trend Forecast ---
+        let growthRates = [];
+        for (let i = 1; i < predicted.length; i++) {
+            if (predicted[i-1] > 0) {
+                growthRates.push(predicted[i] / predicted[i-1]);
+            }
+        }
+
+        let avgTrend = avg(growthRates);
+        let lastPred = predicted[predicted.length - 1];
+        let nextForecast = (lastPred * avgTrend).toFixed(2);
+
+        document.getElementById("forecast").innerHTML =
+            `<b>Projected Dengue Cases Next Month:</b> <span class="highlight">${nextForecast}</span>`;
+
+        // --- Forecast Chart ---
+        let futureDate = getNextMonth(dates[dates.length - 1]);
+        const extendedDates = [...dates, futureDate];
+        const extendedPreds = [...predicted, nextForecast];
+
+        new Chart(document.getElementById('chart5'), {
+            type: 'line',
             data: {
-                labels: data.future_forecast_dates,
+                labels: extendedDates,
                 datasets: [
-                    {
-                        label: "Forecast (Next 4 Months)",
-                        data: data.future_forecast_values,
-                        borderColor: "#0a7c25",
-                        borderWidth: 2,
-                        tension: 0.4
-                    }
+                    { label: 'Predicted', data: predicted, borderColor: '#e67e22', borderWidth: 2 },
+                    { label: 'Forecast Next Month', data: extendedPreds, borderColor: '#0a7c25', borderDash:[6,6], borderWidth: 2 }
                 ]
             }
         });
 
-        // ============================
-        // Forecast values text
-        // ============================
-        let f_html = "<b>Predicted Dengue Cases:</b><br><br>";
-        data.future_forecast_dates.forEach((d, i) => {
-            f_html += `${d}: <span class='highlight'>${Math.round(data.future_forecast_values[i])}</span><br>`;
-        });
-
-        document.getElementById("forecast_values").innerHTML = f_html;
-    })
-    .catch(error => {
-        console.error("Error loading JSON:", error);
-        document.body.innerHTML += "<p style='color:red'>Failed to load dashboard_output.json</p>";
+        function getNextMonth(dateString){
+            let d = new Date(dateString);
+            d.setMonth(d.getMonth() + 1);
+            return d.toISOString().split("T")[0].slice(0,7) + "-01";
+        }
     });
 </script>
-
-</body>
-</html>
